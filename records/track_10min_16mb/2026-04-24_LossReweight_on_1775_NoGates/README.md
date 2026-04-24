@@ -89,28 +89,33 @@ python3 -c "from flash_attn_interface import flash_attn_func; print('FA3 OK')"
 
 ## Reproduction
 
+All commands assume **CWD = repo root** (so `./data/datasets/fineweb10B_sp8192/...` and `./data/tokenizers/fineweb_8192_bpe.model` resolve correctly). Pass the script by full path.
+
 Single seed at `alpha=0.0` (sanity, must reproduce PR #1775):
 ```bash
+SCRIPT=records/track_10min_16mb/2026-04-24_LossReweight_on_1775_NoGates/train_gpt.py
 NCCL_NET=Socket DATA_DIR=./data \
   LOSS_REWEIGHT_ALPHA=0.0 \
   SEED=42 RUN_ID=train_seed42_a0 \
-  torchrun --standalone --nproc_per_node=8 train_gpt.py > train_seed42_a0.log 2>&1
+  torchrun --standalone --nproc_per_node=8 "$SCRIPT" > train_seed42_a0.log 2>&1
 ```
 
 Single seed at `alpha=1.0`:
 ```bash
+SCRIPT=records/track_10min_16mb/2026-04-24_LossReweight_on_1775_NoGates/train_gpt.py
 NCCL_NET=Socket DATA_DIR=./data \
   LOSS_REWEIGHT_ALPHA=1.0 \
   SEED=42 RUN_ID=train_seed42_a1 \
-  torchrun --standalone --nproc_per_node=8 train_gpt.py > train_seed42_a1.log 2>&1
+  torchrun --standalone --nproc_per_node=8 "$SCRIPT" > train_seed42_a1.log 2>&1
 ```
 
 Sweep plan (single seed first, 3-seed if winning alpha found):
 ```bash
+SCRIPT=records/track_10min_16mb/2026-04-24_LossReweight_on_1775_NoGates/train_gpt.py
 for a in 0.0 0.5 1.0 2.0 -0.5; do
   NCCL_NET=Socket DATA_DIR=./data \
     LOSS_REWEIGHT_ALPHA=$a SEED=42 RUN_ID=train_seed42_a${a} \
-    torchrun --standalone --nproc_per_node=8 train_gpt.py \
+    torchrun --standalone --nproc_per_node=8 "$SCRIPT" \
     > train_seed42_a${a}.log 2>&1
 done
 ```
