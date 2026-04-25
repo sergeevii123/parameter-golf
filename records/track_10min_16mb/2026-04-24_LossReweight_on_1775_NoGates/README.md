@@ -79,7 +79,7 @@ This base is not record-eligible by itself (1.07285 > 1.06157). The goal here is
 **Packages**:
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cu128
-pip install sentencepiece triton numpy brotli
+pip install sentencepiece triton numpy brotli pyminify
 pip install flash_attn_3 --no-deps \
     --find-links https://windreamer.github.io/flash-attention3-wheels/cu128_torch291/
 python3 -c "from flash_attn_interface import flash_attn_func; print('FA3 OK')"
