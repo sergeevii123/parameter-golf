@@ -1,0 +1,38 @@
+{
+  "author": "sergeevii123",
+  "github_id": "sergeevii123",
+  "name": "Loss Reweight (predictability-weighted CE) on 3-Layer Recurrence + Parallel Residuals base",
+  "date": "2026-04-25",
+  "track": "10min_16mb",
+  "val_bpb": null,
+  "val_bpb_std": null,
+  "seeds": [0, 42, 1337],
+  "seed_results": {},
+  "hardware": "8xH100 80GB SXM",
+  "pytorch_version": "2.9.1+cu128",
+  "technique_summary": "Predictability-weighted per-token CE on top of PR #1413 base. Per-token NLL rescaled by clipped, mean-1-normalized ratio of own NLL to batch-mean NLL, raised to alpha (warmup-ramped). Bit-identical to base when LOSS_REWEIGHT_ALPHA=0.",
+  "compliance": {
+    "train_under_600s": null,
+    "artifact_under_16mb": null,
+    "eval_under_600s": null,
+    "no_slot": true,
+    "no_pre_quant_ttt": true,
+    "no_etlb": true,
+    "no_ngram_cache": true,
+    "score_first_ttt": true,
+    "three_seeds": null
+  },
+  "base": "PR #1413 (2026-04-09): SP8192 + 3-Layer Recurrence + Parallel Residuals + QK-Gain 5.25 + Legal TTT, 3-seed val_bpb 1.0810",
+  "attribution": {
+    "base_submission": "@bigbag / @dexhunter (PR #1413)",
+    "sp8192_gptq_sdclip": "@clarkkev (PR #1394)",
+    "depth_recurrence": "@dexhunter (PR #1331, #1437)",
+    "parallel_residuals": "@Robby955 (PR #1412), @msisovic (PR #1204)",
+    "legal_ttt_framework": "@abaybektursun (PR #549), @dexhunter (PR #1413)"
+  },
+  "prior_negative_results": {
+    "PR_1360": "Gaussian per-token NLL reweight on PR #180 base — +0.014 bpb (worse). Diagnosis: reshaped train objective ≠ BPB metric.",
+    "PR_1233": "Focal Loss (gamma=2.0) — 1.1460 bpb (worse).",
+    "PR_1380": "Cosine LR + focal loss investigation."
+  }
+}
