@@ -1,0 +1,37 @@
+{
+  "author": "sergeevii123",
+  "github_id": "sergeevii123",
+  "name": "Unigram-prior output bias on PR #1855 LQER + 9-hparam stack base",
+  "blurb": "Adds a fixed (vocab_size,) bias to output logits, initialized to log p(token) computed from the first training shard with Laplace smoothing. Bias is a non-trainable buffer added inside _project_logits + forward_ttt, before logit_softcap. Disabled (UNIGRAM_PRIOR_ENABLED=0) is bit-identical to PR #1855. Hypothesis: model starts from unigram distribution at step 0, frees gradient capacity for learning higher-order structure inside the 600s budget. Built on PR #1855 (codemath3000, 1.06108 BPB, current main frontier).",
+  "date": "2026-04-29",
+  "track": "10min_16mb",
+  "status": "pending-runs",
+  "val_bpb": null,
+  "val_bpb_std": null,
+  "seeds": [42, 0, 1234],
+  "seed_results": {},
+  "base": "PR #1855 (2026-04-27): 11L XSA + LQER + SparseAttnGate + BOS-fixed SmearGate + PolarNS Muon + 9-hparam stack, 3-seed mean 1.06108",
+  "hardware": "8xH100 80GB SXM",
+  "pytorch_version": "2.9.1+cu128",
+  "cuda_version": "12.8",
+  "flash_attn_version": "FA3 (cu128_torch291 wheel)",
+  "technique_summary": "PR #1855 base + unigram-prior output bias. New env vars: UNIGRAM_PRIOR_ENABLED, UNIGRAM_PRIOR_SHARDS. Patch: 4 surgical edits — Hyperparameters block, GPT.__init__ (register fp32 buffer, persistent), _project_logits (pre-softcap add), forward_ttt inline logits (post-LoRA, pre-softcap add), train_model (compute log p from first N CaseOps shards, Laplace+1, copy into buffer). Buffer (8192 elements) hits GPTQ fp16 passthrough branch — round-trip clean.",
+  "compliance": {
+    "train_under_600s": null,
+    "artifact_under_16mb": null,
+    "eval_under_600s": null,
+    "no_slot": true,
+    "no_pre_quant_ttt": true,
+    "no_etlb": true,
+    "no_ngram_cache": true,
+    "score_first_ttt": true,
+    "three_seeds": false
+  },
+  "attribution": {
+    "base_submission": "@codemath3000 (PR #1855)",
+    "lqer_int4": "@dexhunter (PR #1797)",
+    "polar_express_ns_min_lr_sparse_gate_fused_ce": "@nprime06 (PR #1787)",
+    "caseops_tokenizer": "@romeerp (PR #1729)",
+    "smeargate": "@MarioPaerle (PR #1667)"
+  }
+}
