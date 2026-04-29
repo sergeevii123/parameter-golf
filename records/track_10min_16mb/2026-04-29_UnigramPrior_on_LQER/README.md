@@ -57,40 +57,116 @@ log_p = (counts.log() - counts.sum().log()).float()
 
 ## Reproduction
 
-This dir contains the same auxiliary files as PR #1855 (`lossless_caps.py`, `prepare_caseops_data.py`, `tokenizers/...`, `requirements.txt`). The `train_gpt.py` is PR #1855's with the unigram-prior patch applied.
+This dir is self-contained: same aux files as PR #1855 (`lossless_caps.py`, `prepare_caseops_data.py`, `tokenizers/...`, `requirements.txt`). The `train_gpt.py` is PR #1855's with the unigram-prior patch applied.
 
-CWD = repo root. CaseOps shards must be tokenized first via PR #1855's pipeline (see `prepare_caseops_data.py`).
+### 0. Hardware + OS prerequisites
 
-Sanity (`UNIGRAM_PRIOR_ENABLED=0`, must reproduce PR #1855 seed 42 = 1.05989):
+- 8× H100 80GB SXM (FA3 is Hopper-only; Ampere/Ada will fail at `from flash_attn_interface import flash_attn_func`).
+- CUDA 12.8, Python ≥ 3.12.
+- System binary `lrzip` (used by `COMPRESSOR=pergroup`):
+  ```bash
+  sudo apt-get install -y lrzip
+  ```
+
+### 1. Python deps
+
 ```bash
-SCRIPT=records/track_10min_16mb/2026-04-29_UnigramPrior_on_LQER/train_gpt.py
-SEED=42 CASEOPS_ENABLED=1 \
-  DATA_PATH=./data/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved \
-  TOKENIZER_PATH=./data/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model \
-  UNIGRAM_PRIOR_ENABLED=0 RUN_ID=train_seed42_up0 \
-  torchrun --standalone --nproc_per_node=8 "$SCRIPT" > train_seed42_up0.log 2>&1
+pip install -r records/track_10min_16mb/2026-04-29_UnigramPrior_on_LQER/requirements.txt
+# FlashAttention 3 (not on PyPI, install from prebuilt wheel):
+pip install --no-deps flash_attn_3 \
+  --find-links https://windreamer.github.io/flash-attention3-wheels/cu128_torch291/
+# verify FA3 imports cleanly:
+python3 -c "from flash_attn_interface import flash_attn_func; print('FA3 OK')"
 ```
 
-Single-shot test (`UNIGRAM_PRIOR_ENABLED=1`, seed 42):
+### 2. Data prep (CaseOps tokenized FineWeb shards)
+
+Two steps: download canonical doc stream from Hugging Face, then run CaseOps tokenizer + byte sidecar to produce the binary shards `train_gpt.py` reads.
+
 ```bash
-SCRIPT=records/track_10min_16mb/2026-04-29_UnigramPrior_on_LQER/train_gpt.py
-SEED=42 CASEOPS_ENABLED=1 \
-  DATA_PATH=./data/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved \
-  TOKENIZER_PATH=./data/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model \
-  UNIGRAM_PRIOR_ENABLED=1 UNIGRAM_PRIOR_SHARDS=1 RUN_ID=train_seed42_up1 \
-  torchrun --standalone --nproc_per_node=8 "$SCRIPT" > train_seed42_up1.log 2>&1
+# (a) Download docs_selected.jsonl from the official challenge HF dataset
+#     (~6 GB raw text). MATCHED_FINEWEB_REPO_ID overrides the default repo.
+python3 data/download_hf_docs_and_tokenize.py \
+  --docs ./fineweb10B_raw/docs_selected.jsonl
+
+# Alternative if you only need the doc stream (skips re-tokenization with the
+# default SP8192 tokenizer): you can also use data/cached_challenge_fineweb.py
+# with the --include-docs flag — both pull from willdepueoai/parameter-golf.
+
+# (b) Tokenize with CaseOps SP model + emit per-token byte sidecar.
+#     Writes to ./data/datasets/fineweb10B_sp8192_caseops/datasets/...
+python3 records/track_10min_16mb/2026-04-29_UnigramPrior_on_LQER/prepare_caseops_data.py \
+  --docs ./fineweb10B_raw/docs_selected.jsonl \
+  --out  ./data/datasets/fineweb10B_sp8192_caseops/datasets \
+  --sp   records/track_10min_16mb/2026-04-29_UnigramPrior_on_LQER/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model
 ```
 
-3-seed validation (only if seed-42 single shot wins by ≥ 0.001 BPB vs PR #1855 seed-42 = 1.05989):
+After step (b) the layout under `./data/` is:
+
+```
+data/datasets/fineweb10B_sp8192_caseops/datasets/
+  tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model
+  datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved/
+    fineweb_train_000000.bin   # uint16 token shards
+    fineweb_train_000001.bin
+    ...
+    fineweb_val_000000.bin
+    fineweb_val_bytes_000000.bin   # parallel uint16 byte-count sidecar (canonical pre-CaseOps bytes)
+```
+
+The byte sidecar is **load-bearing** for legality: BPB is computed against original UTF-8 bytes, not transformed CaseOps tokens. Don't skip it.
+
+Disk: ~19 GB after tokenization (raw docs + shards + sidecar). Make sure you're on a 50+ GB volume.
+
+All run commands assume **CWD = repo root**. The hyperparameter overrides are PR #1855's defaults (greedy-validated 9-hparam stack) and must NOT change for valid comparison — only `UNIGRAM_PRIOR_*`, `SEED`, and `RUN_ID` differ across runs.
+
+### 3. Sanity run (`UNIGRAM_PRIOR_ENABLED=0`, must reproduce PR #1855 seed 42 = 1.05989)
+
 ```bash
 SCRIPT=records/track_10min_16mb/2026-04-29_UnigramPrior_on_LQER/train_gpt.py
+DATA_DIR=./data \
+DATA_PATH=./data/datasets/fineweb10B_sp8192_caseops/datasets/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved \
+TOKENIZER_PATH=./data/datasets/fineweb10B_sp8192_caseops/datasets/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model \
+CASEOPS_ENABLED=1 \
+ITERATIONS=20000 MAX_WALLCLOCK_SECONDS=600 \
+PHASED_TTT_ENABLED=1 PHASED_TTT_PREFIX_DOCS=2500 PHASED_TTT_NUM_PHASES=3 \
+EMBED_BITS=7 MATRIX_LR=0.026 MIN_LR=0.1 \
+MLP_CLIP_SIGMAS=11.5 ATTN_CLIP_SIGMAS=13.0 EMBED_CLIP_SIGMAS=14.0 \
+GRAD_CLIP_NORM=0.3 TTT_CHUNK_SIZE=48 WARMUP_STEPS=20 MUON_BACKEND_STEPS=5 \
+GLOBAL_TTT_MOMENTUM=0.9 WARMDOWN_FRAC=0.85 BETA2=0.99 \
+TTT_BETA2=0.99 TTT_WEIGHT_DECAY=0.5 TTT_LORA_RANK=80 \
+SPARSE_ATTN_GATE_SCALE=0.5 \
+GPTQ_RESERVE_SECONDS=0.5 GPTQ_CALIBRATION_BATCHES=16 VAL_LOSS_EVERY=0 \
+GATED_ATTN_QUANT_GATE=1 SPARSE_ATTN_GATE_ENABLED=1 GATE_WINDOW=12 \
+SMEAR_GATE_ENABLED=1 \
+LQER_ENABLED=1 LQER_ASYM_ENABLED=1 LQER_RANK=4 LQER_FACTOR_BITS=4 LQER_ASYM_GROUP=64 LQER_TOP_K=3 \
+FUSED_CE_ENABLED=1 COMPRESSOR=pergroup NCCL_NET=Socket \
+SEED=42 \
+UNIGRAM_PRIOR_ENABLED=0 RUN_ID=train_seed42_up0 \
+torchrun --standalone --nproc_per_node=8 "$SCRIPT" > train_seed42_up0.log 2>&1
+```
+
+The full env block is verbose — for repeated runs put it in a bash array `COMMON_ENV` and dispatch via `env "${COMMON_ENV[@]}" SEED=$s ... torchrun ...`.
+
+### 4. Single-shot test (`UNIGRAM_PRIOR_ENABLED=1`, seed 42)
+
+Same env block, two flags flipped:
+
+```bash
+... (same env as step 3) ...
+SEED=42 \
+UNIGRAM_PRIOR_ENABLED=1 UNIGRAM_PRIOR_SHARDS=1 RUN_ID=train_seed42_up1 \
+torchrun --standalone --nproc_per_node=8 "$SCRIPT" > train_seed42_up1.log 2>&1
+```
+
+### 5. 3-seed validation (only if seed-42 wins by ≥ 0.001 vs PR #1855 seed-42 = 1.05989)
+
+```bash
 for s in 42 0 1234; do
-  SEED=$s CASEOPS_ENABLED=1 \
-    DATA_PATH=./data/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved \
-    TOKENIZER_PATH=./data/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model \
-    UNIGRAM_PRIOR_ENABLED=1 UNIGRAM_PRIOR_SHARDS=1 RUN_ID=train_seed${s}_up1 \
-    torchrun --standalone --nproc_per_node=8 "$SCRIPT" \
-    > train_seed${s}_up1.log 2>&1
+  ... (same env as step 3) ...
+  SEED=$s \
+  UNIGRAM_PRIOR_ENABLED=1 UNIGRAM_PRIOR_SHARDS=1 RUN_ID=train_seed${s}_up1 \
+  torchrun --standalone --nproc_per_node=8 "$SCRIPT" > train_seed${s}_up1.log 2>&1
 done
 ```
 
